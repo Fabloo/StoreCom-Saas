@@ -43,8 +43,8 @@ export async function GET(request: NextRequest) {
       try {
         googleBusinessAPI.setAuthMode('oauth');
         googleBusinessAPI.setCredentials({ access_token: accessToken } as any);
-        const accounts = await googleBusinessAPI.getAccounts();
-        console.log('[GBP Accounts] Short-lived access token cookie used; fetched accounts', { count: accounts?.length || 0 });
+        const accounts = await googleBusinessAPI.getAllBusinesses();
+        console.log('[GBP Accounts] Short-lived access token cookie used; fetched all businesses', { count: accounts?.length || 0 });
         const res = NextResponse.json({ success: true, accounts });
         if (invalidRefresh) {
           res.cookies.set('gbp_refresh_token', '', { maxAge: 0, path: '/' });
@@ -59,8 +59,8 @@ export async function GET(request: NextRequest) {
             googleBusinessAPI.setRefreshToken(refreshToken);
             const newTokens = await googleBusinessAPI.refreshAccessToken();
             googleBusinessAPI.setCredentials(newTokens);
-            const accounts = await googleBusinessAPI.getAccounts();
-            console.log('[GBP Accounts] Access token refreshed via refresh_token; fetched accounts', { count: accounts?.length || 0 });
+            const accounts = await googleBusinessAPI.getAllBusinesses();
+            console.log('[GBP Accounts] Access token refreshed via refresh_token; fetched all businesses', { count: accounts?.length || 0 });
             const res = NextResponse.json({ success: true, accounts });
             return res;
           } catch (refreshErr) {
@@ -93,8 +93,8 @@ export async function GET(request: NextRequest) {
           refresh_token: refreshToken,
           access_token: newTokens.access_token
         });
-        const accounts = await googleBusinessAPI.getAccounts();
-        console.log('[GBP Accounts] OAuth cookie present; fetched accounts via refreshed access token', { 
+        const accounts = await googleBusinessAPI.getAllBusinesses();
+        console.log('[GBP Accounts] OAuth cookie present; fetched all businesses via refreshed access token', { 
           count: accounts?.length || 0,
           accounts: accounts?.map(a => ({ name: a.name, accountName: a.accountName, type: a.type }))
         });

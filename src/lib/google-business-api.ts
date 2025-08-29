@@ -3,9 +3,10 @@ import { OAuth2Client, JWT } from 'google-auth-library';
 
 // Google Business API scopes (request only what's needed)
 const SCOPES = [
-  'https://www.googleapis.com/auth/business.manage',
   'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/userinfo.email'
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/business.manage',
+  'https://www.googleapis.com/auth/plus.business.manage'
 ];
 
 // Prefer environment-based configuration. Supports either a full JSON blob or individual env vars.
@@ -255,12 +256,37 @@ class GoogleBusinessAPI {
   private authMode: 'oauth' | 'service_account' = 'service_account';
 
   constructor() {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    
+    console.log('[GBP API] === OAuth2Client Initialization Debug ===');
+    console.log('[GBP API] Environment variables at constructor:');
+    console.log('[GBP API] - GOOGLE_CLIENT_ID:', clientId ? `${clientId.substring(0, 10)}...${clientId.substring(clientId.length - 10)}` : 'MISSING');
+    console.log('[GBP API] - GOOGLE_CLIENT_SECRET:', clientSecret ? `${clientSecret.substring(0, 10)}...${clientSecret.substring(clientSecret.length - 10)}` : 'MISSING');
+    console.log('[GBP API] - GOOGLE_REDIRECT_URI:', redirectUri || 'MISSING');
+    console.log('[GBP API] - All env vars:', Object.keys(process.env).filter(key => key.includes('GOOGLE')).map(key => `${key}=${process.env[key] ? 'SET' : 'MISSING'}`));
+    console.log('[GBP API] ===========================================');
+    
     // Initialize OAuth2 client for user authentication
-    this.oauth2Client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
+    try {
+      this.oauth2Client = new OAuth2Client(
+        clientId,
+        clientSecret,
+        redirectUri
+      );
+      console.log('[GBP API] OAuth2Client initialized successfully');
+      console.log('[GBP API] OAuth2Client instance created with provided credentials');
+      
+      // If we have OAuth credentials, default to OAuth mode
+      if (clientId && clientSecret) {
+        this.authMode = 'oauth';
+        console.log('[GBP API] Setting auth mode to OAuth (OAuth credentials detected)');
+      }
+    } catch (error) {
+      console.error('[GBP API] Error initializing OAuth2Client:', error);
+      throw error;
+    }
 
     // Initialize service account client
     this.serviceAccountClient = new JWT({
@@ -291,29 +317,94 @@ class GoogleBusinessAPI {
 
   // Initialize the API clients
   private async initializeAPIs() {
+    console.log('[GBP API] initializeAPIs called, auth mode:', this.authMode);
+    
     // Authorize the service account client
     if (this.authMode === 'service_account') {
+      console.log('[GBP API] Using service account authentication');
       await this.serviceAccountClient.authorize();
     }
     if (this.authMode === 'oauth') {
+      console.log('[GBP API] Using OAuth authentication');
       await this.ensureAccessTokenFromRefresh();
     }
 
+    const authClient = this.getAuthClient();
+    console.log('[GBP API] Auth client type:', authClient.constructor.name);
+    console.log('[GBP API] Auth client has credentials:', !!(authClient as any).credentials);
+
+    // Debug: Check what's available in the google object
+    console.log('[GBP API] Available Google APIs:', Object.keys(google).filter(key => key.includes('mybusiness') || key.includes('business')));
+    
     if (!this.mybusinessaccount) {
-      this.mybusinessaccount = (google as any).mybusinessaccountmanagement({ version: 'v1', auth: this.getAuthClient() });
+      console.log('[GBP API] Initializing mybusinessaccount API client');
+      try {
+        // Try the correct API name
+        if ((google as any).mybusinessaccountmanagement) {
+          this.mybusinessaccount = (google as any).mybusinessaccountmanagement({ version: 'v1', auth: authClient });
+          console.log('[GBP API] mybusinessaccount initialized successfully');
+        } else if ((google as any).mybusinessaccount) {
+          this.mybusinessaccount = (google as any).mybusinessaccount({ version: 'v1', auth: authClient });
+          console.log('[GBP API] mybusinessaccount (alternative) initialized successfully');
+        } else {
+          console.error('[GBP API] mybusinessaccount API not available');
+          this.mybusinessaccount = null;
+        }
+      } catch (error) {
+        console.error('[GBP API] Error initializing mybusinessaccount:', error);
+        this.mybusinessaccount = null;
+      }
     }
     
     if (!this.mybusinessbusinessinformation) {
-      this.mybusinessbusinessinformation = (google as any).mybusinessbusinessinformation({ version: 'v1', auth: this.getAuthClient() });
+      console.log('[GBP API] Initializing mybusinessbusinessinformation API client');
+      try {
+        if ((google as any).mybusinessbusinessinformation) {
+          this.mybusinessbusinessinformation = (google as any).mybusinessbusinessinformation({ version: 'v1', auth: authClient });
+          console.log('[GBP API] mybusinessbusinessinformation initialized successfully');
+        } else {
+          console.error('[GBP API] mybusinessbusinessinformation API not available');
+          this.mybusinessbusinessinformation = null;
+        }
+      } catch (error) {
+        console.error('[GBP API] Error initializing mybusinessbusinessinformation:', error);
+        this.mybusinessbusinessinformation = null;
+      }
     }
 
     if (!this.mybusinessnotifications) {
-      this.mybusinessnotifications = (google as any).mybusinessnotifications({ version: 'v1', auth: this.getAuthClient() });
+      console.log('[GBP API] Initializing mybusinessnotifications API client');
+      try {
+        if ((google as any).mybusinessnotifications) {
+          this.mybusinessnotifications = (google as any).mybusinessnotifications({ version: 'v1', auth: authClient });
+          console.log('[GBP API] mybusinessnotifications initialized successfully');
+        } else {
+          console.error('[GBP API] mybusinessnotifications API not available');
+          this.mybusinessnotifications = null;
+        }
+      } catch (error) {
+        console.error('[GBP API] Error initializing mybusinessnotifications:', error);
+        this.mybusinessnotifications = null;
+      }
     }
 
     if (!this.mybusinessverifications) {
-      this.mybusinessverifications = (google as any).mybusinessverifications({ version: 'v1', auth: this.getAuthClient() });
+      console.log('[GBP API] Initializing mybusinessverifications API client');
+      try {
+        if ((google as any).mybusinessverifications) {
+          this.mybusinessverifications = (google as any).mybusinessverifications({ version: 'v1', auth: authClient });
+          console.log('[GBP API] mybusinessverifications initialized successfully');
+        } else {
+          console.error('[GBP API] mybusinessverifications API not available');
+          this.mybusinessverifications = null;
+        }
+      } catch (error) {
+        console.error('[GBP API] Error initializing mybusinessverifications:', error);
+        this.mybusinessverifications = null;
+      }
     }
+    
+    console.log('[GBP API] All API clients initialized');
   }
 
   // Set authentication mode
@@ -339,6 +430,9 @@ class GoogleBusinessAPI {
   // Set credentials from tokens
   setCredentials(tokens: any) {
     this.oauth2Client.setCredentials(tokens);
+    // Ensure we're in OAuth mode when credentials are set
+    this.authMode = 'oauth';
+    console.log('[GBP API] Credentials set, auth mode switched to OAuth');
   }
 
   // Set credentials from a refresh token string
@@ -371,18 +465,110 @@ class GoogleBusinessAPI {
 
   // Generate authorization URL
   generateAuthUrl(): string {
-    return this.oauth2Client.generateAuthUrl({
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    
+    console.log('[GBP API] === OAuth Configuration Debug ===');
+    console.log('[GBP API] Environment variables check:');
+    console.log('[GBP API] - GOOGLE_CLIENT_ID:', clientId ? `${clientId.substring(0, 10)}...${clientId.substring(clientId.length - 10)}` : 'MISSING');
+    console.log('[GBP API] - GOOGLE_CLIENT_SECRET:', clientSecret ? `${clientSecret.substring(0, 10)}...${clientSecret.substring(clientSecret.length - 10)}` : 'MISSING');
+    console.log('[GBP API] - GOOGLE_REDIRECT_URI:', redirectUri || 'MISSING');
+    console.log('[GBP API] - SCOPES:', SCOPES);
+    console.log('[GBP API] - NODE_ENV:', process.env.NODE_ENV);
+    console.log('[GBP API] ================================');
+    
+    if (!clientId) {
+      throw new Error('GOOGLE_CLIENT_ID environment variable is required');
+    }
+    
+    if (!redirectUri) {
+      throw new Error('GOOGLE_REDIRECT_URI environment variable is required');
+    }
+    
+    if (!clientSecret) {
+      console.warn('[GBP API] WARNING: GOOGLE_CLIENT_SECRET is missing - this may cause OAuth issues');
+    }
+    
+    const authUrlOptions = {
       access_type: 'offline',
       scope: SCOPES,
-      prompt: 'consent'
-    });
+      prompt: 'consent',
+      redirect_uri: redirectUri
+    };
+    
+    console.log('[GBP API] OAuth2Client.generateAuthUrl options:', JSON.stringify(authUrlOptions, null, 2));
+    
+    try {
+      // Ensure the OAuth2Client has the correct redirect_uri
+      const currentRedirectUri = (this.oauth2Client as any)._redirectUri;
+      if (currentRedirectUri !== redirectUri) {
+        console.log('[GBP API] Updating OAuth2Client redirect_uri from', currentRedirectUri, 'to', redirectUri);
+        // Create a new OAuth2Client instance with the correct redirect_uri
+        this.oauth2Client = new (require('google-auth-library').OAuth2Client)(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          redirectUri
+        );
+        console.log('[GBP API] New OAuth2Client created with redirect_uri:', (this.oauth2Client as any)._redirectUri);
+      }
+      
+      // Force set the redirect_uri on the OAuth2Client instance
+      (this.oauth2Client as any)._redirectUri = redirectUri;
+      console.log('[GBP API] Forced redirect_uri on OAuth2Client:', (this.oauth2Client as any)._redirectUri);
+      
+      const authUrl = this.oauth2Client.generateAuthUrl(authUrlOptions);
+      console.log('[GBP API] Generated OAuth URL successfully');
+      console.log('[GBP API] Auth URL (first 100 chars):', authUrl.substring(0, 100) + '...');
+      console.log('[GBP API] Auth URL contains redirect_uri:', authUrl.includes(redirectUri));
+      console.log('[GBP API] Auth URL contains client_id:', authUrl.includes(clientId));
+      
+      // Debug: Check if redirect_uri is in the options
+      console.log('[GBP API] Debug - redirect_uri in options:', authUrlOptions.redirect_uri);
+      console.log('[GBP API] Debug - OAuth2Client redirect_uri:', (this.oauth2Client as any)._redirectUri);
+      
+      return authUrl;
+    } catch (error) {
+      console.error('[GBP API] Error generating OAuth URL:', error);
+      throw error;
+    }
   }
 
   // Exchange authorization code for tokens
   async getTokensFromCode(code: string) {
-    const { tokens } = await this.oauth2Client.getToken(code);
-    this.oauth2Client.setCredentials(tokens);
-    return tokens;
+    console.log('[GBP API] === Token Exchange Debug ===');
+    console.log('[GBP API] Exchanging code for tokens...');
+    console.log('[GBP API] Code length:', code?.length);
+    console.log('[GBP API] OAuth2Client state:', {
+      hasClientId: !!this.oauth2Client._clientId,
+      hasClientSecret: !!this.oauth2Client._clientSecret,
+      hasRedirectUri: !!(this.oauth2Client as any)._redirectUri
+    });
+    
+    try {
+      const { tokens } = await this.oauth2Client.getToken(code);
+      console.log('[GBP API] Token exchange successful');
+      console.log('[GBP API] Tokens received:', {
+        hasAccessToken: !!tokens.access_token,
+        hasRefreshToken: !!tokens.refresh_token,
+        hasExpiry: !!tokens.expiry_date,
+        tokenKeys: Object.keys(tokens || {})
+      });
+      
+      this.oauth2Client.setCredentials(tokens);
+      console.log('[GBP API] Credentials set on OAuth2Client');
+      
+      return tokens;
+    } catch (error: any) {
+      console.error('[GBP API] Token exchange failed:', error);
+      console.error('[GBP API] Error details:', {
+        message: error?.message || 'Unknown error',
+        code: error?.code || 'No code',
+        status: error?.status || 'No status',
+        response: error?.response?.data || 'No response data'
+      });
+      throw error;
+    }
   }
 
   // Get all accounts
@@ -491,9 +677,164 @@ class GoogleBusinessAPI {
     }
   }
 
+  // Get all businesses (accounts + their locations)
+  async getAllBusinesses(): Promise<GoogleBusinessAccount[]> {
+    console.log('[GBP API] Getting all businesses (accounts + locations)...');
+    
+    try {
+      // First get the main accounts
+      const accounts = await this.getAccounts();
+      console.log('[GBP API] Found main accounts:', accounts.length);
+      
+      if (accounts.length === 0) {
+        console.log('[GBP API] No main accounts found');
+        return [];
+      }
+      
+      // Try to get businesses directly from Business Profile API
+      console.log('[GBP API] Trying to get businesses directly from Business Profile API...');
+      const businesses = await this.getBusinessesDirect();
+      
+      if (businesses.length > 0) {
+        console.log('[GBP API] Found businesses directly:', businesses.length);
+        return businesses;
+      }
+      
+      // Fallback: For each account, get its locations (individual businesses)
+      console.log('[GBP API] Direct business fetch failed, trying locations approach...');
+      const allBusinesses: GoogleBusinessAccount[] = [];
+      
+      for (const account of accounts) {
+        console.log('[GBP API] Processing account:', account.name);
+        
+        try {
+          // Get locations for this account
+          const locations = await this.getLocations(account.name);
+          console.log('[GBP API] Found locations for account', account.name, ':', locations.length);
+          
+          if (locations.length > 0) {
+            // Convert locations to business accounts
+            const businessAccounts = locations.map(location => ({
+              name: location.name,
+              accountName: location.locationName || location.name,
+              type: 'LOCATION',
+              role: 'OWNER',
+              state: 'ACTIVE',
+              profilePhotoUri: undefined,
+              accountNumber: undefined
+            }));
+            
+            allBusinesses.push(...businessAccounts);
+            console.log('[GBP API] Added business accounts from locations:', businessAccounts.length);
+          } else {
+            // If no locations, add the main account itself
+            allBusinesses.push(account);
+            console.log('[GBP API] No locations found, added main account');
+          }
+        } catch (locationError) {
+          console.error('[GBP API] Error fetching locations for account', account.name, ':', locationError);
+          // Still add the main account even if locations fail
+          allBusinesses.push(account);
+        }
+      }
+      
+      console.log('[GBP API] Total businesses found:', allBusinesses.length);
+      return allBusinesses;
+      
+    } catch (error) {
+      console.error('[GBP API] Error getting all businesses:', error);
+      // Fallback to just accounts if the full process fails
+      console.log('[GBP API] Falling back to accounts only');
+      return await this.getAccounts();
+    }
+  }
+
+  // Get businesses directly from Business Profile API
+  private async getBusinessesDirect(): Promise<GoogleBusinessAccount[]> {
+    try {
+      const authClient = this.getAuthClient();
+      const tokenResp = await (authClient as any).getAccessToken();
+      const accessToken = tokenResp?.token || tokenResp;
+      
+      console.log('[GBP API] Getting businesses directly from Business Profile API...');
+      
+      // Try the Business Profile API for businesses
+      const response = await fetch('https://businessprofileperformance.googleapis.com/v1/accounts', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[GBP API] Business Profile API successful, raw data:', JSON.stringify(data, null, 2));
+        
+        if (data.accounts && data.accounts.length > 0) {
+          // Convert to our format
+          const businesses = data.accounts.map((account: any) => ({
+            name: account.name || account.accountName,
+            accountName: account.accountName || account.name,
+            type: account.type || 'BUSINESS',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            profilePhotoUri: undefined,
+            accountNumber: undefined
+          }));
+          
+          console.log('[GBP API] Converted businesses:', businesses);
+          return businesses;
+        }
+      }
+      
+      // Try alternative Business Profile endpoint
+      console.log('[GBP API] Trying alternative Business Profile endpoint...');
+      const altResponse = await fetch('https://businessprofileperformance.googleapis.com/v1/locations', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (altResponse.ok) {
+        const data = await altResponse.json();
+        console.log('[GBP API] Alternative Business Profile API successful, raw data:', JSON.stringify(data, null, 2));
+        
+        if (data.locations && data.locations.length > 0) {
+          // Convert locations to business accounts
+          const businesses = data.locations.map((location: any) => ({
+            name: location.name || location.locationName,
+            accountName: location.locationName || location.name,
+            type: 'LOCATION',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            profilePhotoUri: undefined,
+            accountNumber: undefined
+          }));
+          
+          console.log('[GBP API] Converted locations to businesses:', businesses);
+          return businesses;
+        }
+      }
+      
+      console.log('[GBP API] Direct business fetch failed, no businesses found');
+      return [];
+      
+    } catch (error) {
+      console.error('[GBP API] Error in direct business fetch:', error);
+      return [];
+    }
+  }
+
   // Get locations for an account
   async getLocations(accountName: string): Promise<GoogleBusinessLocation[]> {
     await this.initializeAPIs();
+    
+    // If the API client is not available, try direct API call
+    if (!this.mybusinessaccount) {
+      console.log('[GBP API] mybusinessaccount API client not available, trying direct API call');
+      return await this.getLocationsDirect(accountName);
+    }
     
     try {
       const response = await this.mybusinessaccount.accounts.locations.list({
@@ -502,8 +843,93 @@ class GoogleBusinessAPI {
       });
       return response.data.locations || [];
     } catch (error) {
-      console.error('Error fetching locations:', error);
-      throw new Error('Failed to fetch locations');
+      console.error('[GBP API] Error fetching locations via API client:', error);
+      console.log('[GBP API] Falling back to direct API call');
+      return await this.getLocationsDirect(accountName);
+    }
+  }
+
+  // Fallback method to get locations via direct API call
+  private async getLocationsDirect(accountName: string): Promise<GoogleBusinessLocation[]> {
+    try {
+      const authClient = this.getAuthClient();
+      const tokenResp = await (authClient as any).getAccessToken();
+      const accessToken = tokenResp?.token || tokenResp;
+      
+      console.log('[GBP API] Getting locations via direct API call for account:', accountName);
+      
+      // Try the Business Profile API for locations (newer endpoint)
+      console.log('[GBP API] Trying Business Profile API endpoint...');
+      const response = await fetch(`https://businessprofileperformance.googleapis.com/v1/${accountName}/locations`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[GBP API] Business Profile API successful, found locations:', data.locations?.length || 0);
+        return data.locations || [];
+      }
+      
+      // Try the My Business Account Management API (current standard)
+      console.log('[GBP API] Business Profile API failed, trying My Business Account Management API...');
+      const accountResponse = await fetch(`https://mybusinessaccountmanagement.googleapis.com/v1/${accountName}/locations`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (accountResponse.ok) {
+        const data = await accountResponse.json();
+        console.log('[GBP API] My Business Account Management API successful, found locations:', data.locations?.length || 0);
+        return data.locations || [];
+      }
+      
+      // Try the legacy My Business API as last resort
+      console.log('[GBP API] My Business Account Management API failed, trying legacy My Business API...');
+      const legacyResponse = await fetch(`https://mybusiness.googleapis.com/v4/${accountName}/locations`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (legacyResponse.ok) {
+        const data = await legacyResponse.json();
+        console.log('[GBP API] Legacy My Business API successful, found locations:', data.locations?.length || 0);
+        return data.locations || [];
+      }
+      
+      // If all fail, try to get the error details
+      const errorText = await legacyResponse.text();
+      console.error('[GBP API] All location API calls failed. Last error:', legacyResponse.status, errorText);
+      
+      // Try one more approach - check if we need to use a different account format
+      console.log('[GBP API] Trying alternative account format...');
+      const altAccountName = accountName.replace('accounts/', '');
+      const altResponse = await fetch(`https://mybusinessaccountmanagement.googleapis.com/v1/accounts/${altAccountName}/locations`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (altResponse.ok) {
+        const data = await altResponse.json();
+        console.log('[GBP API] Alternative account format successful, found locations:', data.locations?.length || 0);
+        return data.locations || [];
+      }
+      
+      // Return empty array instead of throwing error to allow fallback to main account
+      return [];
+      
+    } catch (error) {
+      console.error('[GBP API] Error in direct location API call:', error);
+      // Return empty array instead of throwing error to allow fallback to main account
+      return [];
     }
   }
 
