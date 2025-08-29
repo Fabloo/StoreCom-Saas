@@ -749,76 +749,121 @@ class GoogleBusinessAPI {
     }
   }
 
-  // Get businesses directly from Business Profile API
+  // Get businesses directly from Business Profile API using the correct flow
   private async getBusinessesDirect(): Promise<GoogleBusinessAccount[]> {
     try {
       const authClient = this.getAuthClient();
       const tokenResp = await (authClient as any).getAccessToken();
       const accessToken = tokenResp?.token || tokenResp;
       
-      console.log('[GBP API] Getting businesses directly from Business Profile API...');
+      console.log('[GBP API] Getting businesses using correct API flow...');
       
-      // Try the Business Profile API for businesses
-      const response = await fetch('https://businessprofileperformance.googleapis.com/v1/accounts', {
+      // Step 1: Get all accounts using Account Management API
+      console.log('[GBP API] Step 1: Getting accounts from Account Management API...');
+      const accountsResponse = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/json',
         },
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[GBP API] Business Profile API successful, raw data:', JSON.stringify(data, null, 2));
+      if (!accountsResponse.ok) {
+        console.error('[GBP API] Account Management API failed:', accountsResponse.status);
+        return [];
+      }
+      
+      const accountsData = await accountsResponse.json();
+      console.log('[GBP API] Accounts found:', accountsData.accounts?.length || 0);
+      
+      if (!accountsData.accounts || accountsData.accounts.length === 0) {
+        console.log('[GBP API] No accounts found');
+        return [];
+      }
+      
+      const allBusinesses: GoogleBusinessAccount[] = [];
+      
+      // Step 2: For each account, get its locations using Business Information API
+      for (const account of accountsData.accounts) {
+        console.log('[GBP API] Processing account:', account.name, 'Type:', account.type);
         
-        if (data.accounts && data.accounts.length > 0) {
-          // Convert to our format
-          const businesses = data.accounts.map((account: any) => ({
-            name: account.name || account.accountName,
+        // Extract accountId from account name (e.g., "accounts/1234567890" -> "1234567890")
+        const accountId = account.name?.replace('accounts/', '');
+        if (!accountId) {
+          console.log('[GBP API] Skipping account with invalid name:', account.name);
+          continue;
+        }
+        
+        try {
+          // Step 3: Get locations for this account using Business Information API
+          console.log('[GBP API] Step 3: Getting locations for account:', accountId);
+          const locationsResponse = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${accountId}/locations?readMask=name,title,storeCode,websiteUri,regularHours,serviceArea,labels`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Accept': 'application/json',
+            },
+          });
+          
+          if (locationsResponse.ok) {
+            const locationsData = await locationsResponse.json();
+            console.log('[GBP API] Locations found for account', accountId, ':', locationsData.locations?.length || 0);
+            
+            if (locationsData.locations && locationsData.locations.length > 0) {
+              // Convert locations to business accounts
+              const businessAccounts = locationsData.locations.map((location: any) => ({
+                name: location.name,
+                accountName: account.accountName || account.name,
+                type: 'LOCATION',
+                role: 'OWNER',
+                state: 'ACTIVE',
+                profilePhotoUri: undefined,
+                accountNumber: accountId
+              }));
+              
+              allBusinesses.push(...businessAccounts);
+              console.log('[GBP API] Added business accounts from locations:', businessAccounts.length);
+            } else {
+              // If no locations, add the main account itself
+              allBusinesses.push({
+                name: account.name,
+                accountName: account.accountName || account.name,
+                type: account.type || 'BUSINESS',
+                role: 'OWNER',
+                state: 'ACTIVE',
+                profilePhotoUri: undefined,
+                accountNumber: accountId
+              });
+              console.log('[GBP API] No locations found, added main account');
+            }
+          } else {
+            console.log('[GBP API] Failed to get locations for account', accountId, 'Status:', locationsResponse.status);
+            // Still add the main account even if locations fail
+            allBusinesses.push({
+              name: account.name,
+              accountName: account.accountName || account.name,
+              type: account.type || 'BUSINESS',
+              role: 'OWNER',
+              state: 'ACTIVE',
+              profilePhotoUri: undefined,
+              accountNumber: accountId
+            });
+          }
+        } catch (locationError) {
+          console.error('[GBP API] Error fetching locations for account', accountId, ':', locationError);
+          // Still add the main account even if locations fail
+          allBusinesses.push({
+            name: account.name,
             accountName: account.accountName || account.name,
             type: account.type || 'BUSINESS',
             role: 'OWNER',
             state: 'ACTIVE',
             profilePhotoUri: undefined,
-            accountNumber: undefined
-          }));
-          
-          console.log('[GBP API] Converted businesses:', businesses);
-          return businesses;
+            accountNumber: accountId
+          });
         }
       }
       
-      // Try alternative Business Profile endpoint
-      console.log('[GBP API] Trying alternative Business Profile endpoint...');
-      const altResponse = await fetch('https://businessprofileperformance.googleapis.com/v1/locations', {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
-      });
-      
-      if (altResponse.ok) {
-        const data = await altResponse.json();
-        console.log('[GBP API] Alternative Business Profile API successful, raw data:', JSON.stringify(data, null, 2));
-        
-        if (data.locations && data.locations.length > 0) {
-          // Convert locations to business accounts
-          const businesses = data.locations.map((location: any) => ({
-            name: location.name || location.locationName,
-            accountName: location.locationName || location.name,
-            type: 'LOCATION',
-            role: 'OWNER',
-            state: 'ACTIVE',
-            profilePhotoUri: undefined,
-            accountNumber: undefined
-          }));
-          
-          console.log('[GBP API] Converted locations to businesses:', businesses);
-          return businesses;
-        }
-      }
-      
-      console.log('[GBP API] Direct business fetch failed, no businesses found');
-      return [];
+      console.log('[GBP API] Total businesses found using correct API flow:', allBusinesses.length);
+      return allBusinesses;
       
     } catch (error) {
       console.error('[GBP API] Error in direct business fetch:', error);
@@ -858,9 +903,15 @@ class GoogleBusinessAPI {
       
       console.log('[GBP API] Getting locations via direct API call for account:', accountName);
       
-      // Try the Business Profile API for locations (newer endpoint)
-      console.log('[GBP API] Trying Business Profile API endpoint...');
-      const response = await fetch(`https://businessprofileperformance.googleapis.com/v1/${accountName}/locations`, {
+      // Use the correct API endpoint as per Google documentation
+      console.log('[GBP API] Using correct API endpoint for locations...');
+      
+      // Extract accountId from account name (e.g., "accounts/1234567890" -> "1234567890")
+      const accountId = accountName.replace('accounts/', '');
+      console.log('[GBP API] Extracted accountId:', accountId);
+      
+      // Use the Business Information API as per documentation
+      const response = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${accountId}/locations?readMask=name,title,storeCode,websiteUri,regularHours,serviceArea,labels`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/json',
@@ -869,13 +920,13 @@ class GoogleBusinessAPI {
       
       if (response.ok) {
         const data = await response.json();
-        console.log('[GBP API] Business Profile API successful, found locations:', data.locations?.length || 0);
+        console.log('[GBP API] Business Information API successful, found locations:', data.locations?.length || 0);
         return data.locations || [];
       }
       
-      // Try the My Business Account Management API (current standard)
-      console.log('[GBP API] Business Profile API failed, trying My Business Account Management API...');
-      const accountResponse = await fetch(`https://mybusinessaccountmanagement.googleapis.com/v1/${accountName}/locations`, {
+      // If that fails, try the Account Management API as fallback
+      console.log('[GBP API] Business Information API failed, trying Account Management API...');
+      const accountResponse = await fetch(`https://mybusinessaccountmanagement.googleapis.com/v1/accounts/${accountId}/locations`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/json',
@@ -884,44 +935,13 @@ class GoogleBusinessAPI {
       
       if (accountResponse.ok) {
         const data = await accountResponse.json();
-        console.log('[GBP API] My Business Account Management API successful, found locations:', data.locations?.length || 0);
+        console.log('[GBP API] Account Management API successful, found locations:', data.locations?.length || 0);
         return data.locations || [];
       }
       
-      // Try the legacy My Business API as last resort
-      console.log('[GBP API] My Business Account Management API failed, trying legacy My Business API...');
-      const legacyResponse = await fetch(`https://mybusiness.googleapis.com/v4/${accountName}/locations`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
-      });
-      
-      if (legacyResponse.ok) {
-        const data = await legacyResponse.json();
-        console.log('[GBP API] Legacy My Business API successful, found locations:', data.locations?.length || 0);
-        return data.locations || [];
-      }
-      
-      // If all fail, try to get the error details
-      const errorText = await legacyResponse.text();
-      console.error('[GBP API] All location API calls failed. Last error:', legacyResponse.status, errorText);
-      
-      // Try one more approach - check if we need to use a different account format
-      console.log('[GBP API] Trying alternative account format...');
-      const altAccountName = accountName.replace('accounts/', '');
-      const altResponse = await fetch(`https://mybusinessaccountmanagement.googleapis.com/v1/accounts/${altAccountName}/locations`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
-      });
-      
-      if (altResponse.ok) {
-        const data = await altResponse.json();
-        console.log('[GBP API] Alternative account format successful, found locations:', data.locations?.length || 0);
-        return data.locations || [];
-      }
+      // Log the error details
+      const errorText = await response.text();
+      console.error('[GBP API] Location API calls failed. Last error:', response.status, errorText);
       
       // Return empty array instead of throwing error to allow fallback to main account
       return [];
