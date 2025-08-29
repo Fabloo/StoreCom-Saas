@@ -91,8 +91,9 @@ export async function GET(request: NextRequest) {
         return res;
       } catch (tokenError) {
         console.error('[GBP Auth] Token exchange failed:', tokenError);
+        const errorMessage = tokenError instanceof Error ? tokenError.message : String(tokenError);
         return NextResponse.json(
-          { error: 'Failed to exchange authorization code for tokens', details: tokenError.message },
+          { error: 'Failed to exchange authorization code for tokens', details: errorMessage },
           { status: 500 }
         );
       }
