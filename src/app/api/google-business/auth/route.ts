@@ -109,7 +109,6 @@ export async function GET(request: NextRequest) {
       console.log('[GBP Auth] - NEXT_PUBLIC_BASE_URL:', process.env.NEXT_PUBLIC_BASE_URL || 'MISSING');
       console.log('[GBP Auth] ======================================');
       
-      // Allow callers to specify where to return after auth via `returnTo`, passed through OAuth `state`
       const returnTo = searchParams.get('returnTo');
       console.log('[GBP Auth] returnTo parameter:', returnTo);
       
