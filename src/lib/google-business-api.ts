@@ -36,21 +36,29 @@ export interface GoogleBusinessAccount {
   state: string;
   profilePhotoUri?: string;
   accountNumber?: string;
+  locationCount?: number;
+  locations?: GoogleBusinessLocation[];
 }
 
 export interface GoogleBusinessLocation {
   name: string;
-  locationName: string;
-  primaryCategory: {
+  locationName?: string;
+  title?: string; // Google API response has this
+  primaryCategory?: {
     displayName: string;
     categoryId: string;
   };
-  categories: Array<{
+  categories?: Array<{
     displayName: string;
     categoryId: string;
   }>;
   storeCode?: string;
   websiteUri?: string;
+  phoneNumbers?: {
+    primaryPhone?: string;
+    additionalPhones?: string[];
+  };
+  description?: string;
   regularHours?: {
     periods: Array<{
       openDay: string;
@@ -700,8 +708,8 @@ class GoogleBusinessAPI {
         return businesses;
       }
       
-      // Fallback: For each account, get its locations (individual businesses)
-      console.log('[GBP API] Direct business fetch failed, trying locations approach...');
+      // Fallback: For each account, get its locations but keep the account structure
+      console.log('[GBP API] Direct business fetch failed, using accounts with locations...');
       const allBusinesses: GoogleBusinessAccount[] = [];
       
       for (const account of accounts) {
@@ -713,19 +721,15 @@ class GoogleBusinessAPI {
           console.log('[GBP API] Found locations for account', account.name, ':', locations.length);
           
           if (locations.length > 0) {
-            // Convert locations to business accounts
-            const businessAccounts = locations.map(location => ({
-              name: location.name,
-              accountName: location.locationName || location.name,
-              type: 'LOCATION',
-              role: 'OWNER',
-              state: 'ACTIVE',
-              profilePhotoUri: undefined,
-              accountNumber: undefined
-            }));
+            // Keep the main account and add location count info
+            const accountWithLocations = {
+              ...account,
+              locationCount: locations.length,
+              locations: locations // Add locations array for reference
+            };
             
-            allBusinesses.push(...businessAccounts);
-            console.log('[GBP API] Added business accounts from locations:', businessAccounts.length);
+            allBusinesses.push(accountWithLocations);
+            console.log('[GBP API] Added account with locations:', account.accountName, 'Locations:', locations.length);
           } else {
             // If no locations, add the main account itself
             allBusinesses.push(account);
@@ -808,29 +812,32 @@ class GoogleBusinessAPI {
             console.log('[GBP API] Locations found for account', accountId, ':', locationsData.locations?.length || 0);
             
             if (locationsData.locations && locationsData.locations.length > 0) {
-              // Convert locations to business accounts
-              const businessAccounts = locationsData.locations.map((location: any) => ({
-                name: location.name,
+              // Create account with nested locations instead of separate businesses
+              const accountWithLocations = {
+                name: account.name,
                 accountName: account.accountName || account.name,
-                type: 'LOCATION',
+                type: account.type || 'ACCOUNT',
                 role: 'OWNER',
                 state: 'ACTIVE',
                 profilePhotoUri: undefined,
-                accountNumber: accountId
-              }));
+                accountNumber: accountId,
+                locationCount: locationsData.locations.length,
+                locations: locationsData.locations
+              };
               
-              allBusinesses.push(...businessAccounts);
-              console.log('[GBP API] Added business accounts from locations:', businessAccounts.length);
+              allBusinesses.push(accountWithLocations);
+              console.log('[GBP API] Added account with nested locations:', account.accountName, 'Locations:', locationsData.locations.length);
             } else {
               // If no locations, add the main account itself
               allBusinesses.push({
                 name: account.name,
                 accountName: account.accountName || account.name,
-                type: account.type || 'BUSINESS',
+                type: account.type || 'ACCOUNT',
                 role: 'OWNER',
                 state: 'ACTIVE',
                 profilePhotoUri: undefined,
-                accountNumber: accountId
+                accountNumber: accountId,
+                locationCount: 0
               });
               console.log('[GBP API] No locations found, added main account');
             }
@@ -840,11 +847,12 @@ class GoogleBusinessAPI {
             allBusinesses.push({
               name: account.name,
               accountName: account.accountName || account.name,
-              type: account.type || 'BUSINESS',
+              type: account.type || 'ACCOUNT',
               role: 'OWNER',
               state: 'ACTIVE',
               profilePhotoUri: undefined,
-              accountNumber: accountId
+              accountNumber: accountId,
+              locationCount: 0
             });
           }
         } catch (locationError) {
@@ -853,11 +861,12 @@ class GoogleBusinessAPI {
           allBusinesses.push({
             name: account.name,
             accountName: account.accountName || account.name,
-            type: account.type || 'BUSINESS',
+            type: account.type || 'ACCOUNT',
             role: 'OWNER',
             state: 'ACTIVE',
             profilePhotoUri: undefined,
-            accountNumber: accountId
+            accountNumber: accountId,
+            locationCount: 0
           });
         }
       }
@@ -1093,20 +1102,36 @@ class GoogleBusinessAPI {
 
   // Reply to a review
   async replyToReview(reviewName: string, comment: string): Promise<any> {
-    await this.initializeAPIs();
-    
     try {
-      const response = await this.mybusinessaccount.accounts.locations.reviews.updateReply({
-        name: reviewName,
-        requestBody: {
-          comment: comment
+      console.log('[GBP API] Replying to review:', reviewName);
+      
+      const authClient = this.getAuthClient();
+      const tokenResp = await (authClient as any).getAccessToken();
+      const accessToken = tokenResp?.token || tokenResp;
+      
+      const response = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/${reviewName}/reviewReply`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
         },
-        auth: this.getAuthClient(),
+        body: JSON.stringify({
+          comment: comment
+        })
       });
-      return response.data;
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Failed to reply to review: ${errorData.error?.message || response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('[GBP API] Review reply successful');
+      return result;
+      
     } catch (error) {
-      console.error('Error replying to review:', error);
-      throw new Error('Failed to reply to review');
+      console.error('[GBP API] Error replying to review:', error);
+      throw error;
     }
   }
 

@@ -217,7 +217,7 @@ export default function StoresPage() {
     }
   };
 
-  return (
+    return (
     <div className="grid gap-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -420,20 +420,20 @@ export default function StoresPage() {
       </Card>
 
       {/* Stores Table */}
-      <Card>
+    <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <div>
+        <div>
               <CardTitle>Stores ({filteredStores.length})</CardTitle>
-              <CardDescription>
+            <CardDescription>
                 Showing {filteredStores.length} of {totalStores} stores
-              </CardDescription>
-            </div>
+            </CardDescription>
+        </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm">
                 <Filter className="mr-2 h-4 w-4" />
                 Advanced Filter
-              </Button>
+            </Button>
               <Button variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4" />
                 Export
@@ -459,24 +459,24 @@ export default function StoresPage() {
                 const metrics = getStoreMetrics(store._id);
                 return (
                   <TableRow key={store._id}>
-                    <TableCell>
+                  <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center">
                           <Building className="h-5 w-5 text-gray-600" />
                         </div>
                         <div>
-                          <div className="font-medium">{store.storeName}</div>
-                          <div className="text-sm text-muted-foreground">{store.storeCode}</div>
+                    <div className="font-medium">{store.storeName}</div>
+                    <div className="text-sm text-muted-foreground">{store.storeCode}</div>
                         </div>
                       </div>
-                    </TableCell>
-                    <TableCell>
+                  </TableCell>
+                  <TableCell>
                       <div>
                         <div className="font-medium">{store.address.city}, {store.address.state}</div>
                         <div className="text-sm text-muted-foreground">{store.address.line1}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
+                    </div>
+                  </TableCell>
+                  <TableCell>
                       <div>
                         <Badge variant="secondary">{store.primaryCategory}</Badge>
                         {store.additionalCategories && store.additionalCategories.length > 0 && (
@@ -485,8 +485,8 @@ export default function StoresPage() {
                           </div>
                         )}
                       </div>
-                    </TableCell>
-                    <TableCell>
+                  </TableCell>
+                  <TableCell>
                       <div className="text-center">
                         {metrics.reviews > 0 ? (
                           <>
@@ -499,10 +499,10 @@ export default function StoresPage() {
                           </>
                         ) : (
                           <div className="text-sm text-muted-foreground">No reviews yet</div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
                       <div className="flex items-center gap-2">
                         {getStatusIcon(store.status)}
                         {getStatusBadge(store.status)}
@@ -673,8 +673,8 @@ export default function StoresPage() {
                           <Globe className="h-4 w-4" />
                         </Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                  </TableCell>
+                </TableRow>
                 );
               })}
             </TableBody>

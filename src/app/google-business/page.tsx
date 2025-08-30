@@ -59,17 +59,23 @@ interface GoogleBusinessAccount {
 
 interface GoogleBusinessLocation {
   name: string;
-  locationName: string;
-  primaryCategory: {
+  locationName?: string;
+  title?: string;
+  primaryCategory?: {
     displayName: string;
     categoryId: string;
   };
-  categories: Array<{
+  categories?: Array<{
     displayName: string;
     categoryId: string;
   }>;
   storeCode?: string;
   websiteUri?: string;
+  phoneNumbers?: {
+    primaryPhone?: string;
+    additionalPhones?: string[];
+  };
+  description?: string;
   profile?: {
     description?: string;
     phoneNumbers?: {
@@ -201,7 +207,11 @@ export default function GoogleBusinessPage() {
       if (data.success) {
         setAccounts(data.accounts);
         if (data.accounts.length > 0) {
-          setSelectedAccount(data.accounts[0].name);
+          const selectedAccount = data.accounts[0].name;
+          setSelectedAccount(selectedAccount);
+          
+          // Automatically fetch locations for the selected account
+          await fetchLocations(selectedAccount);
         }
       }
     } catch (error) {
@@ -331,6 +341,35 @@ export default function GoogleBusinessPage() {
     }
   };
 
+  const syncReviewsFromGoogle = async (locationName: string) => {
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/google-business/reviews?locationName=${locationName}&sync=true`);
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: data.message || "Reviews synced successfully",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to sync reviews",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to sync reviews from Google.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Do not auto-fetch accounts on auth; only fetch on button click
 
   useEffect(() => {
@@ -446,7 +485,7 @@ export default function GoogleBusinessPage() {
               <SelectContent>
                 {locations.map((location) => (
                   <SelectItem key={location.name} value={location.name}>
-                    {location.locationName}
+                    {location.title || location.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -519,33 +558,33 @@ export default function GoogleBusinessPage() {
                       <div>
                         <Label>Business Name</Label>
                         <p className="text-sm text-muted-foreground">
-                          {locations.find(loc => loc.name === selectedLocation)?.locationName}
+                          {locations.find(loc => loc.name === selectedLocation)?.title || 'Not set'}
                         </p>
                       </div>
                       <div>
                         <Label>Category</Label>
                         <p className="text-sm text-muted-foreground">
-                          {locations.find(loc => loc.name === selectedLocation)?.primaryCategory.displayName}
+                          {locations.find(loc => loc.name === selectedLocation)?.primaryCategory?.displayName || 'Not set'}
                         </p>
                       </div>
                       <div>
                         <Label>Phone</Label>
                         <p className="text-sm text-muted-foreground">
-                          {locations.find(loc => loc.name === selectedLocation)?.profile?.phoneNumbers?.primaryPhone || 'Not set'}
+                          {locations.find(loc => loc.name === selectedLocation)?.phoneNumbers?.primaryPhone || 'Not set'}
                         </p>
                       </div>
                       <div>
                         <Label>Website</Label>
                         <p className="text-sm text-muted-foreground">
-                          {locations.find(loc => loc.name === selectedLocation)?.profile?.websiteUri || 'Not set'}
+                          {locations.find(loc => loc.name === selectedLocation)?.websiteUri || 'Not set'}
                         </p>
                       </div>
                     </div>
-                    {locations.find(loc => loc.name === selectedLocation)?.profile?.description && (
+                    {locations.find(loc => loc.name === selectedLocation)?.description && (
                       <div>
                         <Label>Description</Label>
                         <p className="text-sm text-muted-foreground">
-                          {locations.find(loc => loc.name === selectedLocation)?.profile?.description}
+                          {locations.find(loc => loc.name === selectedLocation)?.description}
                         </p>
                       </div>
                     )}
@@ -760,22 +799,37 @@ export default function GoogleBusinessPage() {
           <TabsContent value="reviews" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Reviews Management</CardTitle>
-                <CardDescription>
-                  View and respond to customer reviews
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <MessageSquare className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">Reviews Integration</h3>
-                  <p className="text-muted-foreground mb-6">
-                    Reviews are managed through the main Reviews page. Visit the Reviews section to view and respond to customer feedback.
-                  </p>
-                  <Button variant="outline" onClick={() => window.location.href = '/reviews'}>
-                    Go to Reviews
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle>Reviews</CardTitle>
+                    <CardDescription>
+                      Customer reviews and ratings for this location
+                    </CardDescription>
+                  </div>
+                  <Button 
+                    onClick={() => syncReviewsFromGoogle(selectedLocation)}
+                    disabled={isLoading || !selectedLocation}
+                    variant="outline"
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Sync Reviews
                   </Button>
                 </div>
+              </CardHeader>
+              <CardContent>
+                {selectedLocation ? (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">
+                      Click "Sync Reviews" to fetch reviews from Google Business Profile
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">
+                      Select a location to view and sync reviews
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

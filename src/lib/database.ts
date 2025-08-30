@@ -94,6 +94,30 @@ export interface User {
   updatedAt: Date;
 }
 
+// Review interface for Google Business Profile reviews
+export interface Review {
+  _id?: ObjectId;
+  locationId: string;
+  locationName: string;
+  reviewId: string;
+  reviewerName: string;
+  rating: number;
+  comment: string;
+  reviewTime: Date;
+  updateTime?: Date;
+  reviewReply?: {
+    comment: string;
+    updateTime: Date;
+  };
+  sentiment?: 'positive' | 'negative' | 'neutral';
+  keywords?: string[];
+  source: 'google_business' | 'manual';
+  isResolved: boolean;
+  tags?: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // Hash password
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
@@ -260,5 +284,131 @@ export const userOperations = {
       { email },
       { $set: { passwordHash: hashedPassword, updatedAt: new Date() } }
     );
+  }
+}; 
+
+// Review Operations
+export const reviewOperations = {
+  async createReview(reviewData: Omit<Review, '_id' | 'createdAt' | 'updatedAt'>) {
+    try {
+      const { db } = await connectToDatabase();
+      const review: Review = {
+        ...reviewData,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      const result = await db.collection('reviews').insertOne(review);
+      return { ...review, _id: result.insertedId };
+    } catch (error) {
+      console.error('Error creating review:', error);
+      throw error;
+    }
+  },
+
+  async getReviewsByLocation(locationId: string) {
+    try {
+      const { db } = await connectToDatabase();
+      return await db.collection('reviews')
+        .find({ locationId })
+        .sort({ reviewTime: -1 })
+        .toArray();
+    } catch (error) {
+      console.error('Error fetching reviews by location:', error);
+      throw error;
+    }
+  },
+
+  async getAllReviews() {
+    try {
+      const { db } = await connectToDatabase();
+      return await db.collection('reviews')
+        .find({})
+        .sort({ reviewTime: -1 })
+        .toArray();
+    } catch (error) {
+      console.error('Error fetching all reviews:', error);
+      throw error;
+    }
+  },
+
+  async updateReview(reviewId: string, updateData: Partial<Review>) {
+    try {
+      const { db } = await connectToDatabase();
+      const result = await db.collection('reviews').updateOne(
+        { reviewId },
+        { 
+          $set: { 
+            ...updateData, 
+            updatedAt: new Date() 
+          } 
+        }
+      );
+      return result.modifiedCount > 0;
+    } catch (error) {
+      console.error('Error updating review:', error);
+      throw error;
+    }
+  },
+
+  async addReviewReply(reviewId: string, replyComment: string) {
+    try {
+      const { db } = await connectToDatabase();
+      const result = await db.collection('reviews').updateOne(
+        { reviewId },
+        { 
+          $set: { 
+            reviewReply: {
+              comment: replyComment,
+              updateTime: new Date()
+            },
+            updatedAt: new Date()
+          } 
+        }
+      );
+      return result.modifiedCount > 0;
+    } catch (error) {
+      console.error('Error adding review reply:', error);
+      throw error;
+    }
+  },
+
+  async deleteReview(reviewId: string) {
+    try {
+      const { db } = await connectToDatabase();
+      const result = await db.collection('reviews').deleteOne({ reviewId });
+      return result.deletedCount > 0;
+    } catch (error) {
+      console.error('Error deleting review:', error);
+      throw error;
+    }
+  },
+
+  async getReviewStats() {
+    try {
+      const { db } = await connectToDatabase();
+      const pipeline = [
+        {
+          $group: {
+            _id: null,
+            totalReviews: { $sum: 1 },
+            averageRating: { $avg: '$rating' },
+            positiveReviews: { $sum: { $cond: [{ $gte: ['$rating', 4] }, 1, 0] } },
+            negativeReviews: { $sum: { $cond: [{ $lte: ['$rating', 2] }, 1, 0] } },
+            neutralReviews: { $sum: { $cond: [{ $and: [{ $gt: ['$rating', 2] }, { $lt: ['$rating', 4] }] }, 1, 0] } }
+          }
+        }
+      ];
+      const result = await db.collection('reviews').aggregate(pipeline).toArray();
+      return result[0] || {
+        totalReviews: 0,
+        averageRating: 0,
+        positiveReviews: 0,
+        negativeReviews: 0,
+        neutralReviews: 0
+      };
+    } catch (error) {
+      console.error('Error getting review stats:', error);
+      throw error;
+    }
   }
 }; 

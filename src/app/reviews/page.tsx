@@ -16,621 +16,570 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import {
-  Building,
-  Star,
   MessageSquare,
-  Search,
-  Filter,
-  Download,
-  Reply,
-  Eye,
-  Edit,
-  Trash2,
-  Plus,
+  Star,
   RefreshCw,
+  Filter,
+  Search,
+  Reply,
   TrendingUp,
   TrendingDown,
+  Minus,
+  Plus,
+  Download,
   Calendar,
+  User,
   MapPin,
-  Phone,
-  Globe,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  BarChart3,
-  PieChart
 } from "lucide-react";
-import { sampleReviews, sampleBrand } from "@/lib/mock-data";
+import { useToast } from "@/hooks/use-toast";
 
 interface Review {
-  id: string;
-  storeId: string;
-  storeName: string;
+  _id?: string;
+  locationId: string;
+  locationName: string;
+  reviewId: string;
   reviewerName: string;
-  reviewerEmail: string;
   rating: number;
-  title: string;
-  content: string;
-  response?: string;
-  status: 'published' | 'pending' | 'flagged' | 'hidden';
-  source: 'google' | 'facebook' | 'yelp' | 'internal';
-  helpfulCount: number;
+  comment: string;
+  reviewTime: Date;
+  updateTime?: Date;
+  reviewReply?: {
+    comment: string;
+    updateTime: Date;
+  };
+  sentiment?: 'positive' | 'negative' | 'neutral';
+  keywords?: string[];
+  source: 'google_business' | 'manual';
+  isResolved: boolean;
+  tags?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
 
+interface ReviewStats {
+  totalReviews: number;
+  averageRating: number;
+  positiveReviews: number;
+  negativeReviews: number;
+  neutralReviews: number;
+}
+
 export default function ReviewsPage() {
-  const [reviews, setReviews] = useState<Review[]>(sampleReviews);
-  const [filteredReviews, setFilteredReviews] = useState<Review[]>(sampleReviews);
-  const [selectedReview, setSelectedReview] = useState<Review | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [filteredReviews, setFilteredReviews] = useState<Review[]>([]);
+  const [stats, setStats] = useState<ReviewStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStore, setSelectedStore] = useState<string>('all');
-  const [selectedRating, setSelectedRating] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const [selectedSource, setSelectedSource] = useState<string>('all');
+  const [selectedLocation, setSelectedLocation] = useState<string>('all');
+  const [selectedSentiment, setSelectedSentiment] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [replyText, setReplyText] = useState('');
-  const [isReplyDialogOpen, setIsReplyDialogOpen] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [locations, setLocations] = useState<string[]>([]);
+  const { toast } = useToast();
 
-  // Filter reviews based on all criteria
   useEffect(() => {
-    let filtered = reviews;
+    fetchReviews();
+    fetchReviewStats();
+  }, []);
 
-    if (searchQuery) {
-      filtered = filtered.filter(review =>
-        review.storeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        review.reviewerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        review.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        review.title.toLowerCase().includes(searchQuery.toLowerCase())
+  useEffect(() => {
+    filterReviews();
+  }, [reviews, selectedLocation, selectedSentiment, searchTerm]);
+
+  const fetchReviews = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/google-business/reviews');
+      const data = await response.json();
+      
+      if (data.success) {
+        setReviews(data.reviews);
+        // Extract unique locations
+        const uniqueLocations = [...new Set(data.reviews.map((r: Review) => r.locationName))];
+        setLocations(uniqueLocations.filter(Boolean) as string[]);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to fetch reviews.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchReviewStats = async () => {
+    try {
+      const response = await fetch('/api/reviews/stats');
+      const data = await response.json();
+      
+      if (data.success) {
+        setStats(data.stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch review stats:', error);
+    }
+  };
+
+  const syncReviewsFromGoogle = async (locationName?: string) => {
+    try {
+      setIsLoading(true);
+      
+      if (!locationName) {
+        // If no specific location, sync from all available locations
+        if (locations.length === 0) {
+          toast({
+            title: "No Locations Available",
+            description: "Please sync locations from Google Business Profile first.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        // Sync from all locations
+        let totalSynced = 0;
+        for (const location of locations) {
+          try {
+            const response = await fetch(`/api/google-business/reviews?locationName=${location}&sync=true`);
+            const data = await response.json();
+            if (data.success) {
+              totalSynced++;
+            }
+          } catch (error) {
+            console.error(`Failed to sync reviews for location ${location}:`, error);
+          }
+        }
+        
+        if (totalSynced > 0) {
+          toast({
+            title: "Sync Completed",
+            description: `Successfully synced reviews from ${totalSynced} locations`,
+          });
+          await fetchReviews();
+          await fetchReviewStats();
+      } else {
+          toast({
+            title: "Sync Failed",
+            description: "Failed to sync reviews from any locations",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+      
+      // Sync from specific location
+      const response = await fetch(`/api/google-business/reviews?locationName=${locationName}&sync=true`);
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: data.message || "Reviews synced successfully",
+        });
+        await fetchReviews();
+        await fetchReviewStats();
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to sync reviews",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to sync reviews from Google.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const filterReviews = () => {
+    let filtered = [...reviews];
+
+    // Filter by location
+    if (selectedLocation !== 'all') {
+      filtered = filtered.filter(review => review.locationName === selectedLocation);
+    }
+
+    // Filter by sentiment
+    if (selectedSentiment !== 'all') {
+      filtered = filtered.filter(review => review.sentiment === selectedSentiment);
+    }
+
+    // Filter by search term
+    if (searchTerm) {
+      filtered = filtered.filter(review => 
+        review.comment.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        review.reviewerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        review.locationName.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
-    if (selectedStore !== 'all') {
-      filtered = filtered.filter(review => review.storeId === selectedStore);
-    }
-
-    if (selectedRating !== 'all') {
-      filtered = filtered.filter(review => review.rating === parseInt(selectedRating));
-    }
-
-    if (selectedStatus !== 'all') {
-      filtered = filtered.filter(review => review.status === selectedStatus);
-    }
-
-    if (selectedSource !== 'all') {
-      filtered = filtered.filter(review => review.source === selectedSource);
-    }
-
     setFilteredReviews(filtered);
-  }, [reviews, searchQuery, selectedStore, selectedRating, selectedStatus, selectedSource]);
-
-  // Calculate metrics
-  const totalReviews = reviews.length;
-  const averageRating = reviews.reduce((acc, review) => acc + review.rating, 0) / totalReviews;
-  const ratingDistribution = {
-    5: reviews.filter(r => r.rating === 5).length,
-    4: reviews.filter(r => r.rating === 4).length,
-    3: reviews.filter(r => r.rating === 3).length,
-    2: reviews.filter(r => r.rating === 2).length,
-    1: reviews.filter(r => r.rating === 1).length
-  };
-  const pendingReviews = reviews.filter(r => r.status === 'pending').length;
-  const flaggedReviews = reviews.filter(r => r.status === 'flagged').length;
-  const responseRate = (reviews.filter(r => r.response).length / totalReviews) * 100;
-
-  const stores = sampleBrand.stores;
-
-  const refreshData = async () => {
-    setIsLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsLoading(false);
   };
 
-  const handleReply = async () => {
-    if (!selectedReview || !replyText.trim()) return;
+  const handleReply = async (reviewId: string) => {
+    if (!replyText.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a reply comment.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    // Update review with response
-    const updatedReviews = reviews.map(review =>
-      review.id === selectedReview.id
-        ? { ...review, response: replyText, updatedAt: new Date() }
-        : review
-    );
+    try {
+      const response = await fetch('/api/google-business/reviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'reply',
+          reviewId,
+          replyComment: replyText
+        })
+      });
 
-    setReviews(updatedReviews);
-    setReplyText('');
-    setIsReplyDialogOpen(false);
-    setSelectedReview(null);
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Reply added successfully",
+        });
+        setReplyText('');
+        setReplyingTo(null);
+        await fetchReviews();
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add reply.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleStatusChange = async (reviewId: string, newStatus: Review['status']) => {
-    const updatedReviews = reviews.map(review =>
-      review.id === reviewId
-        ? { ...review, status: newStatus, updatedAt: new Date() }
-        : review
-    );
-
-    setReviews(updatedReviews);
+  const getSentimentColor = (sentiment: string) => {
+    switch (sentiment) {
+      case 'positive': return 'bg-green-100 text-green-800';
+      case 'negative': return 'bg-red-100 text-red-800';
+      case 'neutral': return 'bg-gray-100 text-gray-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
   };
 
-  const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+  const getSentimentIcon = (sentiment: string) => {
+    switch (sentiment) {
+      case 'positive': return <TrendingUp className="h-4 w-4" />;
+      case 'negative': return <TrendingDown className="h-4 w-4" />;
+      case 'neutral': return <Minus className="h-4 w-4" />;
+      default: return <Minus className="h-4 w-4" />;
+    }
   };
 
-  const getRatingColor = (rating: number) => {
-    if (rating >= 4) return 'text-green-600';
-    if (rating >= 3) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const getStatusBadge = (status: Review['status']) => {
-    const variants = {
-      published: 'default',
-      pending: 'secondary',
-      flagged: 'destructive',
-      hidden: 'outline'
-    } as const;
-
-    return <Badge variant={variants[status]}>{status}</Badge>;
-  };
-
-  const getSourceBadge = (source: Review['source']) => {
-    const colors = {
-      google: 'bg-blue-100 text-blue-800',
-      facebook: 'bg-indigo-100 text-indigo-800',
-      yelp: 'bg-red-100 text-red-800',
-      internal: 'bg-gray-100 text-gray-800'
-    };
-
-    return (
-      <Badge className={colors[source]} variant="secondary">
-        {source.charAt(0).toUpperCase() + source.slice(1)}
-      </Badge>
-    );
+  const renderStars = (rating: number) => {
+    return Array.from({ length: 5 }, (_, i) => (
+      <Star
+        key={i}
+        className={`h-4 w-4 ${i < rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`}
+      />
+    ));
   };
 
   return (
-    <div className="grid gap-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto py-6 space-y-6">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Reviews Management</h1>
           <p className="text-muted-foreground">
-            Monitor and respond to customer feedback across all your stores
+            Manage and respond to customer reviews from all locations
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <Button onClick={refreshData} disabled={isLoading}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button>
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={() => syncReviewsFromGoogle()} 
+            disabled={isLoading}
+            variant="outline"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            {locations.length > 0 ? 'Sync All Locations' : 'Sync from Google'}
+                    </Button>
         </div>
       </div>
 
-      {/* Metrics Overview */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      {/* Stats Cards */}
+      {stats && (
+        <div className="grid gap-4 md:grid-cols-5">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Reviews</CardTitle>
-            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Reviews</CardTitle>
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalReviews}</div>
-            <div className="flex items-center gap-1 text-sm">
-              <Star className="h-3 w-3 text-yellow-500 fill-current" />
-              <span className="text-muted-foreground">{averageRating.toFixed(1)} avg rating</span>
-            </div>
+              <div className="text-2xl font-bold">{stats.totalReviews}</div>
           </CardContent>
         </Card>
-
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Response Rate</CardTitle>
-            <Reply className="h-4 w-4 text-muted-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Average Rating</CardTitle>
+              <Star className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{responseRate.toFixed(1)}%</div>
-            <p className="text-xs text-muted-foreground">
-              {reviews.filter(r => r.response).length} of {totalReviews} responded
-            </p>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.averageRating.toFixed(1)}</div>
           </CardContent>
         </Card>
-
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Reviews</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingReviews}</div>
-            <p className="text-xs text-muted-foreground">
-              Need attention
-            </p>
-          </CardContent>
-        </Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Positive</CardTitle>
+              <TrendingUp className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{stats.positiveReviews}</div>
+            </CardContent>
+          </Card>
+                            <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Neutral</CardTitle>
+              <Minus className="h-4 w-4 text-gray-600" />
+                                </CardHeader>
+                                <CardContent>
+              <div className="text-2xl font-bold text-gray-600">{stats.neutralReviews}</div>
+                                </CardContent>
+                            </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Negative</CardTitle>
+              <TrendingDown className="h-4 w-4 text-red-600" />
+              </CardHeader>
+              <CardContent>
+              <div className="text-2xl font-bold text-red-600">{stats.negativeReviews}</div>
+              </CardContent>
+          </Card>
+        </div>
+      )}
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Flagged Reviews</CardTitle>
-            <AlertCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{flaggedReviews}</div>
-            <p className="text-xs text-muted-foreground">
-              Require review
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Rating Distribution Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Rating Distribution</CardTitle>
-          <CardDescription>Breakdown of customer ratings across all stores</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="space-y-3">
-              {Object.entries(ratingDistribution).reverse().map(([rating, count]) => (
-                <div key={rating} className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 w-16">
-                    <span className="text-sm font-medium">{rating}</span>
-                    <Star className="h-3 w-3 text-yellow-500 fill-current" />
-                  </div>
-                  <div className="flex-1 bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-yellow-500 h-2 rounded-full"
-                      style={{ width: `${(count / totalReviews) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-sm text-muted-foreground w-8 text-right">
-                    {count}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-4xl font-bold text-yellow-500 mb-2">
-                  {averageRating.toFixed(1)}
-                </div>
-                <div className="flex items-center justify-center gap-1 mb-2">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <Star
-                      key={star}
-                      className={`h-5 w-5 ${
-                        star <= Math.round(averageRating)
-                          ? 'text-yellow-500 fill-current'
-                          : 'text-gray-300'
-                      }`}
-                    />
-                  ))}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Average rating from {totalReviews} reviews
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Filters and Search */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters & Search</CardTitle>
-          <CardDescription>Find specific reviews using the filters below</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search reviews..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-
-            <Select value={selectedStore} onValueChange={setSelectedStore}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Stores" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Stores</SelectItem>
-                {stores.map((store) => (
-                  <SelectItem key={store._id} value={store._id}>
-                    {store.storeName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedRating} onValueChange={setSelectedRating}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Ratings" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Ratings</SelectItem>
-                <SelectItem value="5">5 Stars</SelectItem>
-                <SelectItem value="4">4 Stars</SelectItem>
-                <SelectItem value="3">3 Stars</SelectItem>
-                <SelectItem value="2">2 Stars</SelectItem>
-                <SelectItem value="1">1 Star</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="published">Published</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="flagged">Flagged</SelectItem>
-                <SelectItem value="hidden">Hidden</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedSource} onValueChange={setSelectedSource}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Sources" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Sources</SelectItem>
-                <SelectItem value="google">Google</SelectItem>
-                <SelectItem value="facebook">Facebook</SelectItem>
-                <SelectItem value="yelp">Yelp</SelectItem>
-                <SelectItem value="internal">Internal</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Reviews Table */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
+      {/* Filters */}
+           <Card>
+              <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="h-5 w-5" />
+            Filters
+          </CardTitle>
+              </CardHeader>
+              <CardContent>
+          <div className="grid gap-4 md:grid-cols-4">
             <div>
-              <CardTitle>Reviews ({filteredReviews.length})</CardTitle>
-              <CardDescription>
-                Showing {filteredReviews.length} of {totalReviews} reviews
-              </CardDescription>
+              <Label>Search</Label>
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search reviews..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8"
+                />
+        </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm">
-                <Filter className="mr-2 h-4 w-4" />
-                Advanced Filter
+            <div>
+              <Label>Location</Label>
+              <Select value={selectedLocation} onValueChange={setSelectedLocation}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All locations" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All locations</SelectItem>
+                  {locations.map((location) => (
+                    <SelectItem key={location} value={location}>
+                      {location}
+                    </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        </div>
+            <div>
+              <Label>Sentiment</Label>
+              <Select value={selectedSentiment} onValueChange={setSelectedSentiment}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All sentiments" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All sentiments</SelectItem>
+                  <SelectItem value="positive">Positive</SelectItem>
+                  <SelectItem value="neutral">Neutral</SelectItem>
+                  <SelectItem value="negative">Negative</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button 
+                onClick={() => {
+                  setSelectedLocation('all');
+                  setSelectedSentiment('all');
+                  setSearchTerm('');
+                }}
+                variant="outline"
+                className="w-full"
+              >
+                Clear Filters
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Store</TableHead>
-                <TableHead>Reviewer</TableHead>
-                <TableHead>Rating</TableHead>
-                <TableHead>Content</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredReviews.map((review) => (
-                <TableRow key={review.id}>
-                  <TableCell>
-                    <div className="font-medium">{review.storeName}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {stores.find(s => s._id === review.storeId)?.address.city}, {stores.find(s => s._id === review.storeId)?.address.state}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{review.reviewerName}</div>
-                      <div className="text-sm text-muted-foreground">{review.reviewerEmail}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Star className={`h-4 w-4 fill-current ${getRatingColor(review.rating)}`} />
-                      <span className={`font-medium ${getRatingColor(review.rating)}`}>
-                        {review.rating}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="max-w-xs">
-                      <div className="font-medium">{review.title}</div>
-                      <div className="text-sm text-muted-foreground truncate">
-                        {review.content}
-                      </div>
-                      {review.response && (
-                        <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
-                          <strong>Response:</strong> {review.response}
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {getStatusBadge(review.status)}
-                  </TableCell>
-                  <TableCell>
-                    {getSourceBadge(review.source)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDate(review.createdAt)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-2xl">
-                          <DialogHeader>
-                            <DialogTitle>Review Details</DialogTitle>
-                            <DialogDescription>
-                              Detailed view of the review and response options
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="space-y-4">
-                            <div>
-                              <Label>Store</Label>
-                              <p className="font-medium">{review.storeName}</p>
-                            </div>
-                            <div>
-                              <Label>Reviewer</Label>
-                              <p className="font-medium">{review.reviewerName}</p>
-                              <p className="text-sm text-muted-foreground">{review.reviewerEmail}</p>
-                            </div>
-                            <div>
-                              <Label>Rating</Label>
-                              <div className="flex items-center gap-1">
-                                <Star className={`h-5 w-5 fill-current ${getRatingColor(review.rating)}`} />
-                                <span className={`font-medium ${getRatingColor(review.rating)}`}>
-                                  {review.rating} out of 5
-                                </span>
-                              </div>
-                            </div>
-                            <div>
-                              <Label>Title</Label>
-                              <p className="font-medium">{review.title}</p>
-                            </div>
-                            <div>
-                              <Label>Content</Label>
-                              <p className="text-sm">{review.content}</p>
-                            </div>
-                            {review.response && (
-                              <div>
-                                <Label>Current Response</Label>
-                                <p className="text-sm bg-blue-50 p-2 rounded">{review.response}</p>
-                              </div>
-                            )}
-                          </div>
-                          <DialogFooter>
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setSelectedReview(review);
-                                setReplyText(review.response || '');
-                                setIsReplyDialogOpen(true);
-                              }}
-                            >
-                              <Reply className="mr-2 h-4 w-4" />
-                              {review.response ? 'Edit Response' : 'Reply'}
-                            </Button>
-                            <Select
-                              value={review.status}
-                              onValueChange={(value: Review['status']) => handleStatusChange(review.id, value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="published">Published</SelectItem>
-                                <SelectItem value="pending">Pending</SelectItem>
-                                <SelectItem value="flagged">Flagged</SelectItem>
-                                <SelectItem value="hidden">Hidden</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
+                </CardContent>
+            </Card>
 
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedReview(review);
-                          setReplyText(review.response || '');
-                          setIsReplyDialogOpen(true);
-                        }}
-                      >
-                        <Reply className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {/* Reviews Table */}
+            <Card>
+                <CardHeader>
+          <CardTitle>Reviews ({filteredReviews.length})</CardTitle>
+          <CardDescription>
+            Customer reviews from all locations with sentiment analysis
+          </CardDescription>
+                </CardHeader>
+                <CardContent>
+          {isLoading ? (
+            <div className="text-center py-8">Loading reviews...</div>
+          ) : filteredReviews.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No reviews found. Try adjusting your filters or syncing from Google.
+        </div>
+          ) : (
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                  <TableHead>Reviewer</TableHead>
+                  <TableHead>Rating</TableHead>
+                  <TableHead>Comment</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Sentiment</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Actions</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                         <TableBody>
+                {filteredReviews.map((review) => (
+                  <TableRow key={review._id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        {review.reviewerName}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {renderStars(review.rating)}
+                        <span className="ml-1 text-sm text-muted-foreground">
+                          ({review.rating})
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="max-w-xs">
+                        <p className="text-sm">{review.comment}</p>
+                        {review.reviewReply && (
+                          <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
+                            <strong>Reply:</strong> {review.reviewReply.comment}
+                          </div>
+                        )}
+        </div>
+                    </TableCell>
+                                <TableCell>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm">{review.locationName}</span>
+                      </div>
+                                </TableCell>
+                                <TableCell>
+                      <Badge className={getSentimentColor(review.sentiment || 'neutral')}>
+                        <div className="flex items-center gap-1">
+                          {getSentimentIcon(review.sentiment || 'neutral')}
+                          {review.sentiment || 'neutral'}
+                        </div>
+                      </Badge>
+                                </TableCell>
+                                <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm">
+                          {new Date(review.reviewTime).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {!review.reviewReply ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setReplyingTo(review.reviewId)}
+                        >
+                          <Reply className="mr-2 h-4 w-4" />
+                          Reply
+                                            </Button>
+                      ) : (
+                        <Badge variant="secondary">Replied</Badge>
+                      )}
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+          )}
+            </CardContent>
+        </Card>
 
       {/* Reply Dialog */}
-      <Dialog open={isReplyDialogOpen} onOpenChange={setIsReplyDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reply to Review</DialogTitle>
-            <DialogDescription>
-              Respond to {selectedReview?.reviewerName}'s review for {selectedReview?.storeName}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
+      {replyingTo && (
+        <Card className="fixed inset-4 z-50 max-w-2xl mx-auto">
+          <CardHeader>
+            <CardTitle>Reply to Review</CardTitle>
+            <CardDescription>
+              Your reply will be posted to Google Business Profile and saved locally
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div>
-              <Label>Review</Label>
-              <div className="p-3 bg-gray-50 rounded text-sm">
-                <div className="flex items-center gap-2 mb-2">
-                  <Star className={`h-4 w-4 fill-current ${getRatingColor(selectedReview?.rating || 0)}`} />
-                  <span className="font-medium">{selectedReview?.rating}/5</span>
-                </div>
-                <div className="font-medium">{selectedReview?.title}</div>
-                <div className="text-muted-foreground">{selectedReview?.content}</div>
-              </div>
-            </div>
-            <div>
-              <Label htmlFor="reply">Your Response</Label>
+              <Label htmlFor="reply-text">Reply Comment</Label>
               <Textarea
-                id="reply"
-                placeholder="Write your response to this review..."
+                id="reply-text"
+                placeholder="Enter your reply..."
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 rows={4}
               />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsReplyDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleReply}>
-              <Reply className="mr-2 h-4 w-4" />
-              Send Response
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+                </div>
+            <div className="flex justify-end gap-2">
+                    <Button 
+                      variant="outline" 
+                onClick={() => {
+                  setReplyingTo(null);
+                  setReplyText('');
+                }}
+              >
+                Cancel
+                    </Button>
+                    <Button 
+                onClick={() => handleReply(replyingTo)}
+                disabled={!replyText.trim()}
+                    >
+                Post Reply
+                    </Button>
+                  </div>
+          </CardContent>
+        </Card>
+      )}
+                    </div>
   );
 }
